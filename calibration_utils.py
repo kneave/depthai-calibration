@@ -89,8 +89,7 @@ def polygon_from_image_name(image_name):
 class StereoCalibration(object):
     """Class to Calculate Calibration and Rectify a Stereo Camera."""
 
-    def __init__(self, traceLevel: float = 1.0, outputScaleFactor: float = 0.5, disableCamera: list = [], model = None):
-        self.model = model
+    def __init__(self, traceLevel: float = 1.0, outputScaleFactor: float = 0.5, disableCamera: list = []):
         self.traceLevel = traceLevel
         self.output_scale_factor = outputScaleFactor
         self.disableCamera = disableCamera
@@ -182,8 +181,6 @@ class StereoCalibration(object):
             cv2.imshow('coverage image', combinedCoverageImage)
             cv2.waitKey(0)
             cv2.destroyAllWindows()
-
-        
         
         for camera in board_config['cameras'].keys():
             left_cam_info = board_config['cameras'][camera]
@@ -210,11 +207,6 @@ class StereoCalibration(object):
     
                             extrinsics = self.calibrate_extrinsics(left_path, right_path, left_cam_info['intrinsics'], left_cam_info[
                                                                    'dist_coeff'], right_cam_info['intrinsics'], right_cam_info['dist_coeff'], translation, rotation)
-                            
-                            if extrinsics == None:
-                                print("Extrinsics are None")
-                                return -1, "Extrinsics are None"
-
                             if extrinsics[0] == -1:
                                 return -1, extrinsics[1]
     
@@ -273,18 +265,6 @@ class StereoCalibration(object):
         # Draw the line on the image
         cv2.line(displayframe, start_point, end_point, color, thickness)
         return displayframe
-    
-    def detect_charuco_board(self, image: np.array):
-        arucoParams = cv2.aruco.DetectorParameters_create()
-        arucoParams.minMarkerDistanceRate = 0.01
-        corners, ids, rejectedImgPoints = cv2.aruco.detectMarkers(image, self.aruco_dictionary, parameters=arucoParams)  # First, detect markers
-        marker_corners, marker_ids, refusd, recoverd = cv2.aruco.refineDetectedMarkers(image, self.board, corners, ids, rejectedCorners=rejectedImgPoints)
-        # If found, add object points, image points (after refining them)
-        if len(marker_corners)>0:
-            ret, corners, ids = cv2.aruco.interpolateCornersCharuco(marker_corners,marker_ids,image, self.board, minMarkers = 1)
-            return ret, corners, ids, marker_corners, marker_ids
-        else:
-            return None
 
     def analyze_charuco(self, images, scale_req=False, req_resolution=(800, 1280)):
         """
@@ -333,30 +313,36 @@ class StereoCalibration(object):
                     gray = gray[del_height: del_height + req_resolution[0], :]
 
                 count += 1
-            
-            ret, charuco_corners, charuco_ids, marker_corners, marker_ids  = self.detect_charuco_board(gray)
-
+            marker_corners, ids, rejectedImgPoints = cv2.aruco.detectMarkers(
+                gray, self.aruco_dictionary)
+            marker_corners, ids, refusd, recoverd = cv2.aruco.refineDetectedMarkers(gray, self.board,
+                                                                                    marker_corners, ids, rejectedCorners=rejectedImgPoints)
             if self.traceLevel == 2 or self.traceLevel == 4 or self.traceLevel == 10:
                 print('{0} number of Markers corners detected in the image {1}'.format(
-                    len(charuco_corners), img_pth.name))
+                    len(marker_corners), img_pth.name))
+            if len(marker_corners) > 0:
+                ret, charuco_corners, charuco_ids = cv2.aruco.interpolateCornersCharuco(
+                    marker_corners, ids, gray, self.board, minMarkers = 1)
 
-            if charuco_corners is not None and charuco_ids is not None and len(charuco_corners) > 3:
+                if charuco_corners is not None and charuco_ids is not None and len(charuco_corners) > 3:
 
-                cv2.cornerSubPix(gray, charuco_corners,
-                                    winSize=(5, 5),
-                                    zeroZone=(-1, -1),
-                                    criteria=criteria)
-                allCorners.append(charuco_corners)  # Charco chess corners
-                allIds.append(charuco_ids)  # charuco chess corner id's
-                all_marker_corners.append(marker_corners)
-                all_marker_ids.append(marker_ids)
+                    cv2.cornerSubPix(gray, charuco_corners,
+                                     winSize=(5, 5),
+                                     zeroZone=(-1, -1),
+                                     criteria=criteria)
+                    allCorners.append(charuco_corners)  # Charco chess corners
+                    allIds.append(charuco_ids)  # charuco chess corner id's
+                    all_marker_corners.append(marker_corners)
+                    all_marker_ids.append(ids)
+                else:
+                    print(im)
+                    raise RuntimeError("Failed to detect markers in the image")
             else:
-                print(im)
+                print(im + " Not found")
                 raise RuntimeError("Failed to detect markers in the image")
-
             if self.traceLevel == 2 or self.traceLevel == 4 or self.traceLevel == 10:
                 rgb_img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-                cv2.aruco.drawDetectedMarkers(rgb_img, marker_corners, marker_ids, (0, 0, 255))
+                cv2.aruco.drawDetectedMarkers(rgb_img, marker_corners, ids, (0, 0, 255))
                 cv2.aruco.drawDetectedCornersCharuco(rgb_img, charuco_corners, charuco_ids, (0, 255, 0))
 
                 if rgb_img.shape[1] > 1920:
@@ -549,27 +535,10 @@ class StereoCalibration(object):
             print(cameraMatrixInit)
 
         distCoeffsInit = np.zeros((5, 1))
-        if self.model == None:
-            flags = (cv2.CALIB_USE_INTRINSIC_GUESS + 
+        flags = (cv2.CALIB_USE_INTRINSIC_GUESS + 
                  cv2.CALIB_RATIONAL_MODEL)
-        elif isinstance(self.model, str):
-            if self.model == "NORMAL":
-                flags = (cv2.CALIB_USE_INTRINSIC_GUESS + 
-                    cv2.CALIB_RATIONAL_MODEL)
-            if self.model == "TILTED":
-                flags = (cv2.CALIB_USE_INTRINSIC_GUESS + 
-                    cv2.CALIB_RATIONAL_MODEL + cv2.CALIB_TILTED_MODEL)
-        
-            elif self.model == "PRISM":
-                flags = (cv2.CALIB_USE_INTRINSIC_GUESS + 
-                    cv2.CALIB_RATIONAL_MODEL + cv2.CALIB_TILTED_MODEL)
-        elif "cv2" in str(type(self.model)):
-            flags = self.model
-        # else:
-        #     flags = (cv2.CALIB_USE_INTRINSIC_GUESS + 
-        #             cv2.CALIB_RATIONAL_MODEL)
 
-        flags = (cv2.CALIB_USE_INTRINSIC_GUESS + cv2.CALIB_RATIONAL_MODEL)
+    #     flags = (cv2.CALIB_RATIONAL_MODEL)
         (ret, camera_matrix, distortion_coefficients,
          rotation_vectors, translation_vectors,
          stdDeviationsIntrinsics, stdDeviationsExtrinsics,
@@ -604,10 +573,10 @@ class StereoCalibration(object):
         print("Camera Matrix initialization.............")
         print(cameraMatrixInit)
         flags = 0
-        # flags |= cv2.fisheye.CALIB_CHECK_COND 
+        flags |= cv2.fisheye.CALIB_CHECK_COND 
         flags |= cv2.fisheye.CALIB_USE_INTRINSIC_GUESS 
         flags |= cv2.fisheye.CALIB_RECOMPUTE_EXTRINSIC 
-        flags |= cv2.fisheye.CALIB_FIX_SKEW
+        #flags |= cv2.fisheye.CALIB_FIX_SKEW
         distCoeffsInit = np.zeros((4, 1))
         term_criteria = (cv2.TERM_CRITERIA_COUNT +
                          cv2.TERM_CRITERIA_EPS, 50000, 1e-9)
@@ -625,12 +594,12 @@ class StereoCalibration(object):
             print(len(allIds_l))
             print('Length of allIds_r')
             print(len(allIds_r))
-        
+
         for i in range(len(allIds_l)):
             left_sub_corners = []
             right_sub_corners = []
             obj_pts_sub = []
-            # if len(allIds_l[i]) < 70 or len(allIds_r[i]) < 70:
+            #if len(allIds_l[i]) < 70 or len(allIds_r[i]) < 70:
             #      continue
             for j in range(len(allIds_l[i])):
                 idx = np.where(allIds_r[i] == allIds_l[i][j])
@@ -646,38 +615,20 @@ class StereoCalibration(object):
                 right_corners_sampled.append(
                     np.array(right_sub_corners, dtype=np.float32))
             else:
-                print(f"allId_l index:{i}, left subCorner length {len(left_sub_corners)}, right subCorner length {len(right_sub_corners)}")
                 return -1, "Stereo Calib failed due to less common features"
 
         stereocalib_criteria = (cv2.TERM_CRITERIA_COUNT +
                                 cv2.TERM_CRITERIA_EPS, 1000, 1e-9)
-        
-        print(f"Camera Model: {self.cameraModel}")
-        print(f"Camera Mode: {self.model}")
 
-        if self.model == None:
-            print("Model is None")
-            flags = (cv2.CALIB_FIX_INTRINSIC + 
-                 cv2.CALIB_RATIONAL_MODEL)
-        elif isinstance(self.model, str):
-            if self.model == "NORMAL":
-                flags = (cv2.CALIB_FIX_INTRINSIC + 
-                    cv2.CALIB_RATIONAL_MODEL)
-            if self.model == "TILTED":
-                flags = (cv2.CALIB_FIX_INTRINSIC + 
-                    cv2.CALIB_RATIONAL_MODEL + cv2.CALIB_TILTED_MODEL)
-        
-            elif self.model == "PRISM":
-                flags = (cv2.CALIB_FIX_INTRINSIC + 
-                    cv2.CALIB_RATIONAL_MODEL + cv2.CALIB_TILTED_MODEL)
-        # elif "cv2" in str(type(self.model)):
-        #     flags = self.model
-        #     # print(flags)
         if self.cameraModel == 'perspective':
             flags = 0
-            flags |= cv2.CALIB_USE_EXTRINSIC_GUESS
-            print(f"Perspective camera flags: {flags}")
+            # flags |= cv2.CALIB_USE_EXTRINSIC_GUESS
+            # print(flags)
 
+            flags |= cv2.CALIB_FIX_INTRINSIC
+            # flags |= cv2.CALIB_USE_INTRINSIC_GUESS
+            flags |= cv2.CALIB_RATIONAL_MODEL
+            # print(flags)
             if self.traceLevel == 3 or self.traceLevel == 10:
                 print('Printing Extrinsics guesses...')
                 print(r_in)
@@ -715,10 +666,7 @@ class StereoCalibration(object):
             # print(f'P_r is \n {P_r}')
 
             return [ret, R, T, R_l, R_r, P_l, P_r]
-        
         elif self.cameraModel == 'fisheye':
-            print("CameraModel is fisheye")
-
             # make sure all images have the same *number of* points
             min_num_points = min([len(pts) for pts in obj_pts])
             obj_pts_truncated = [pts[:min_num_points] for pts in obj_pts]
@@ -727,14 +675,14 @@ class StereoCalibration(object):
 
             flags = 0
             # flags |= cv2.fisheye.CALIB_RECOMPUTE_EXTRINSIC
-            flags |= cv2.fisheye.CALIB_CHECK_COND
+            # flags |= cv2.fisheye.CALIB_CHECK_COND
             # flags |= cv2.fisheye.CALIB_FIX_SKEW
             flags |= cv2.fisheye.CALIB_FIX_INTRINSIC
             flags |= cv2.fisheye.CALIB_FIX_K1
             flags |= cv2.fisheye.CALIB_FIX_K2
             flags |= cv2.fisheye.CALIB_FIX_K3 
             flags |= cv2.fisheye.CALIB_FIX_K4
-            flags |= cv2.CALIB_RATIONAL_MODEL
+            # flags |= cv2.CALIB_RATIONAL_MODEL
             # TODO(sACHIN): Try without intrinsic guess
             # flags |= cv2.CALIB_USE_INTRINSIC_GUESS
             # TODO(sACHIN): Try without intrinsic guess
@@ -831,8 +779,6 @@ class StereoCalibration(object):
                 print(f'R_R Euler angles in XYZ {r_euler}')            
             
             return [ret, R, T, R_l, R_r, P_l, P_r]
-        
-        print("Fell through the gaps!")
 
     def display_rectification(self, image_data_pairs, images_corners_l, images_corners_r, image_epipolar_color, isHorizontal):
         print(
@@ -946,12 +892,26 @@ class StereoCalibration(object):
                     cv2.TERM_CRITERIA_MAX_ITER, 10000, 0.00001)
             
         for i, image_data_pair in enumerate(image_data_pairs):
-            res2_l = self.detect_charuco_board(image_data_pair[0])
-            res2_r = self.detect_charuco_board(image_data_pair[1])
+            marker_corners_l, ids_l, rejectedImgPoints = cv2.aruco.detectMarkers(
+                image_data_pair[0], self.aruco_dictionary)
+            marker_corners_l, ids_l, _, _ = cv2.aruco.refineDetectedMarkers(image_data_pair[0], self.board,
+                                                                            marker_corners_l, ids_l,
+                                                                            rejectedCorners=rejectedImgPoints)
+
+            marker_corners_r, ids_r, rejectedImgPoints = cv2.aruco.detectMarkers(
+                image_data_pair[1], self.aruco_dictionary)
+            marker_corners_r, ids_r, _, _ = cv2.aruco.refineDetectedMarkers(image_data_pair[1], self.board,
+                                                                            marker_corners_r, ids_r,
+                                                                            rejectedCorners=rejectedImgPoints)
+
+            res2_l = cv2.aruco.interpolateCornersCharuco(
+                marker_corners_l, ids_l, image_data_pair[0], self.board, minMarkers = 1)
+            res2_r = cv2.aruco.interpolateCornersCharuco(
+                marker_corners_r, ids_r, image_data_pair[1], self.board, minMarkers = 1)
 
             if res2_l[1] is not None and res2_r[2] is not None and len(res2_l[1]) > 3 and len(res2_r[1]) > 3:
 
-                cv2.cornerSubPix(image_data_pair[0], res2_l[1], 
+                cv2.cornerSubPix(image_data_pair[0], res2_l[1],
                                  winSize=(5, 5),
                                  zeroZone=(-1, -1),
                                  criteria=criteria)
@@ -1184,12 +1144,25 @@ class StereoCalibration(object):
         image_epipolar_color = []
         # new_imagePairs = [])
         for i, image_data_pair in enumerate(image_data_pairs):
-            res2_l = self.detect_charuco_board(image_data_pair[0])
-            res2_r = self.detect_charuco_board(image_data_pair[1])
-            
-            if self.traceLevel == 2 or self.traceLevel == 4 or self.traceLevel == 10:
-                print(f'Marekrs length for pair {i} is: L {len(res2_l[1])} | R {len(res2_r[1])} ')
+            #             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            marker_corners_l, ids_l, rejectedImgPoints = cv2.aruco.detectMarkers(
+                image_data_pair[0], self.aruco_dictionary)
+            marker_corners_l, ids_l, _, _ = cv2.aruco.refineDetectedMarkers(image_data_pair[0], self.board,
+                                                                            marker_corners_l, ids_l,
+                                                                            rejectedCorners=rejectedImgPoints)
 
+            marker_corners_r, ids_r, rejectedImgPoints = cv2.aruco.detectMarkers(
+                image_data_pair[1], self.aruco_dictionary)
+            marker_corners_r, ids_r, _, _ = cv2.aruco.refineDetectedMarkers(image_data_pair[1], self.board,
+                                                                            marker_corners_r, ids_r,
+                                                                            rejectedCorners=rejectedImgPoints)
+            if self.traceLevel == 2 or self.traceLevel == 4 or self.traceLevel == 10:
+                print(f'Marekrs length for pair {i} is: L {len(marker_corners_l)} | R {len(marker_corners_r)} ')
+            #print(f'Marekrs length l is {len(marker_corners_l)}')
+            res2_l = cv2.aruco.interpolateCornersCharuco(
+                marker_corners_l, ids_l, image_data_pair[0], self.board, minMarkers = 1)
+            res2_r = cv2.aruco.interpolateCornersCharuco(
+                marker_corners_r, ids_r, image_data_pair[1], self.board, minMarkers = 1)
             img_concat = cv2.hconcat([image_data_pair[0], image_data_pair[1]])
             img_concat = cv2.cvtColor(img_concat, cv2.COLOR_GRAY2RGB)
             line_row = 0
