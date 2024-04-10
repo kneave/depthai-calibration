@@ -182,6 +182,8 @@ class StereoCalibration(object):
             cv2.imshow('coverage image', combinedCoverageImage)
             cv2.waitKey(0)
             cv2.destroyAllWindows()
+
+        
         
         for camera in board_config['cameras'].keys():
             left_cam_info = board_config['cameras'][camera]
@@ -208,6 +210,11 @@ class StereoCalibration(object):
     
                             extrinsics = self.calibrate_extrinsics(left_path, right_path, left_cam_info['intrinsics'], left_cam_info[
                                                                    'dist_coeff'], right_cam_info['intrinsics'], right_cam_info['dist_coeff'], translation, rotation)
+                            
+                            if extrinsics == None:
+                                print("Extrinsics are None")
+                                return -1, "Extrinsics are None"
+
                             if extrinsics[0] == -1:
                                 return -1, extrinsics[1]
     
@@ -558,8 +565,11 @@ class StereoCalibration(object):
                     cv2.CALIB_RATIONAL_MODEL + cv2.CALIB_TILTED_MODEL)
         elif "cv2" in str(type(self.model)):
             flags = self.model
+        # else:
+        #     flags = (cv2.CALIB_USE_INTRINSIC_GUESS + 
+        #             cv2.CALIB_RATIONAL_MODEL)
 
-    #     flags = (cv2.CALIB_RATIONAL_MODEL)
+        flags = (cv2.CALIB_USE_INTRINSIC_GUESS + cv2.CALIB_RATIONAL_MODEL)
         (ret, camera_matrix, distortion_coefficients,
          rotation_vectors, translation_vectors,
          stdDeviationsIntrinsics, stdDeviationsExtrinsics,
@@ -594,10 +604,10 @@ class StereoCalibration(object):
         print("Camera Matrix initialization.............")
         print(cameraMatrixInit)
         flags = 0
-        flags |= cv2.fisheye.CALIB_CHECK_COND 
+        # flags |= cv2.fisheye.CALIB_CHECK_COND 
         flags |= cv2.fisheye.CALIB_USE_INTRINSIC_GUESS 
         flags |= cv2.fisheye.CALIB_RECOMPUTE_EXTRINSIC 
-        #flags |= cv2.fisheye.CALIB_FIX_SKEW
+        flags |= cv2.fisheye.CALIB_FIX_SKEW
         distCoeffsInit = np.zeros((4, 1))
         term_criteria = (cv2.TERM_CRITERIA_COUNT +
                          cv2.TERM_CRITERIA_EPS, 50000, 1e-9)
@@ -615,12 +625,12 @@ class StereoCalibration(object):
             print(len(allIds_l))
             print('Length of allIds_r')
             print(len(allIds_r))
-
+        
         for i in range(len(allIds_l)):
             left_sub_corners = []
             right_sub_corners = []
             obj_pts_sub = []
-            #if len(allIds_l[i]) < 70 or len(allIds_r[i]) < 70:
+            # if len(allIds_l[i]) < 70 or len(allIds_r[i]) < 70:
             #      continue
             for j in range(len(allIds_l[i])):
                 idx = np.where(allIds_r[i] == allIds_l[i][j])
@@ -636,17 +646,17 @@ class StereoCalibration(object):
                 right_corners_sampled.append(
                     np.array(right_sub_corners, dtype=np.float32))
             else:
+                print(f"allId_l index:{i}, left subCorner length {len(left_sub_corners)}, right subCorner length {len(right_sub_corners)}")
                 return -1, "Stereo Calib failed due to less common features"
 
         stereocalib_criteria = (cv2.TERM_CRITERIA_COUNT +
                                 cv2.TERM_CRITERIA_EPS, 1000, 1e-9)
-
-        if self.cameraModel == 'perspective':
-            flags = 0
-            # flags |= cv2.CALIB_USE_EXTRINSIC_GUESS
-            # print(flags)
+        
+        print(f"Camera Model: {self.cameraModel}")
+        print(f"Camera Mode: {self.model}")
 
         if self.model == None:
+            print("Model is None")
             flags = (cv2.CALIB_FIX_INTRINSIC + 
                  cv2.CALIB_RATIONAL_MODEL)
         elif isinstance(self.model, str):
@@ -660,9 +670,14 @@ class StereoCalibration(object):
             elif self.model == "PRISM":
                 flags = (cv2.CALIB_FIX_INTRINSIC + 
                     cv2.CALIB_RATIONAL_MODEL + cv2.CALIB_TILTED_MODEL)
-        elif "cv2" in str(type(self.model)):
-            flags = self.model
-            # print(flags)
+        # elif "cv2" in str(type(self.model)):
+        #     flags = self.model
+        #     # print(flags)
+        if self.cameraModel == 'perspective':
+            flags = 0
+            flags |= cv2.CALIB_USE_EXTRINSIC_GUESS
+            print(f"Perspective camera flags: {flags}")
+
             if self.traceLevel == 3 or self.traceLevel == 10:
                 print('Printing Extrinsics guesses...')
                 print(r_in)
@@ -700,7 +715,10 @@ class StereoCalibration(object):
             # print(f'P_r is \n {P_r}')
 
             return [ret, R, T, R_l, R_r, P_l, P_r]
+        
         elif self.cameraModel == 'fisheye':
+            print("CameraModel is fisheye")
+
             # make sure all images have the same *number of* points
             min_num_points = min([len(pts) for pts in obj_pts])
             obj_pts_truncated = [pts[:min_num_points] for pts in obj_pts]
@@ -709,14 +727,14 @@ class StereoCalibration(object):
 
             flags = 0
             # flags |= cv2.fisheye.CALIB_RECOMPUTE_EXTRINSIC
-            # flags |= cv2.fisheye.CALIB_CHECK_COND
+            flags |= cv2.fisheye.CALIB_CHECK_COND
             # flags |= cv2.fisheye.CALIB_FIX_SKEW
             flags |= cv2.fisheye.CALIB_FIX_INTRINSIC
             flags |= cv2.fisheye.CALIB_FIX_K1
             flags |= cv2.fisheye.CALIB_FIX_K2
             flags |= cv2.fisheye.CALIB_FIX_K3 
             flags |= cv2.fisheye.CALIB_FIX_K4
-            # flags |= cv2.CALIB_RATIONAL_MODEL
+            flags |= cv2.CALIB_RATIONAL_MODEL
             # TODO(sACHIN): Try without intrinsic guess
             # flags |= cv2.CALIB_USE_INTRINSIC_GUESS
             # TODO(sACHIN): Try without intrinsic guess
@@ -813,6 +831,8 @@ class StereoCalibration(object):
                 print(f'R_R Euler angles in XYZ {r_euler}')            
             
             return [ret, R, T, R_l, R_r, P_l, P_r]
+        
+        print("Fell through the gaps!")
 
     def display_rectification(self, image_data_pairs, images_corners_l, images_corners_r, image_epipolar_color, isHorizontal):
         print(
